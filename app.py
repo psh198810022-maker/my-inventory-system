@@ -8,9 +8,8 @@ import plotly.express as px
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="2026년도 재고조사 관리 시스템", layout="wide")
 
-# [보안] 비밀번호 설정 (원하는 비밀번호로 바꾸세요)
-# 주의: 아주 강력한 보안은 아니지만, 일반적인 접근을 막을 수 있습니다.
-PASSWORD = "Eren4667051!" 
+# [보안] 앱 접속 비밀번호 설정 (원하는 번호로 변경 가능)
+PASSWORD = "1234" 
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -24,8 +23,9 @@ def check_password():
 
 if not st.session_state.authenticated:
     st.title("🔒 로그인이 필요합니다")
+    st.write("관계자 외 접근을 제한합니다.")
     st.text_input("접속 비밀번호를 입력하세요", type="password", key="password_input", on_change=check_password)
-    st.stop() # 비밀번호가 틀리면 여기서 멈춤
+    st.stop() # 비밀번호가 틀리면 여기서 프로그램 멈춤
 
 # =============================================================================
 # 로그인 성공 시 아래 내용 실행
@@ -33,22 +33,41 @@ if not st.session_state.authenticated:
 st.title("📊 2026년도 재고조사 관리 시스템")
 
 # -----------------------------------------------------------------------------
-# 2. 데이터 로드 함수
+# 2. 데이터 로드 함수 (구글 드라이브 연동 버전)
 # -----------------------------------------------------------------------------
 @st.cache_data
-def load_data(file_path):
+def load_data():
     try:
-        df = pd.read_excel(file_path, sheet_name=0, header=1)
+        # [중요] Streamlit Secrets(금고)에서 엑셀 주소 가져오기
+        # GitHub에는 주소가 올라가지 않아 안전합니다.
+        file_url = st.secrets["excel_url"]
+        
+        # 구글 드라이브 '보기' 링크를 '다운로드' 링크로 자동 변환
+        if "/file/d/" in file_url:
+            file_id = file_url.split("/file/d/")[1].split("/")[0]
+            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        elif "/spreadsheets/d/" in file_url:
+            file_id = file_url.split("/spreadsheets/d/")[1].split("/")[0]
+            download_url = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx"
+        else:
+            return None, "올바른 구글 드라이브 공유 링크가 아닙니다."
+
+        # 엑셀 파일 읽기
+        df = pd.read_excel(download_url, sheet_name=0, header=1)
+        
+        # 컬럼명 공백 제거
         df.columns = [str(c).strip() for c in df.columns]
 
         if df.empty:
             return None, "데이터 파일이 비어있습니다."
 
+        # 필수 컬럼 확인 및 없으면 빈 값으로 생성
         required_cols = ['idx', '대분류', '중분류', '모델명', '제품번호', '25년 1월', '26년 1월']
         for col in required_cols:
             if col not in df.columns:
                 df[col] = ""
 
+        # 작년 대비 변화 계산 함수
         def calculate_change(row):
             u_val = str(row['25년 1월']).strip() if pd.notna(row['25년 1월']) else ""
             v_val = str(row['26년 1월']).strip() if pd.notna(row['26년 1월']) else ""
@@ -57,30 +76,25 @@ def load_data(file_path):
             elif u_val == v_val: return "변화 없음"
             else: return f"{u_val} → {v_val}"
 
+        # 변화 컬럼 생성
         if '작년 대비 변화' not in df.columns or df['작년 대비 변화'].isnull().all():
             df['작년 대비 변화'] = df.apply(calculate_change, axis=1)
 
         return df, None
     except Exception as e:
-        return None, str(e)
+        # 에러 발생 시 Secrets가 설정되었는지 힌트 제공
+        return None, f"데이터를 불러오지 못했습니다. Streamlit Secrets 설정을 확인하세요.\n에러 내용: {str(e)}"
 
-# 파일 로드
-FILE_PATH = '휴레항.xlsx'
-df, error_msg = load_data(FILE_PATH)
+# 데이터 로드 실행
+df, error_msg = load_data()
 
 if df is None:
-    st.warning(f"기본 파일 로드 실패: {error_msg}")
-    uploaded_file = st.sidebar.file_uploader("엑셀 파일 업로드", type=['xlsx'])
-    if uploaded_file:
-        df, error_msg = load_data(uploaded_file)
-        if df is None:
-            st.error(f"파일 오류: {error_msg}")
-            st.stop()
-    else:
-        st.stop()
+    st.error(f"⚠️ 오류 발생: {error_msg}")
+    st.info("Tip: Streamlit Cloud 설정(Settings) -> Secrets 에 'excel_url'이 정확히 입력되었는지 확인해주세요.")
+    st.stop()
 
 # -----------------------------------------------------------------------------
-# 3. 설정 및 매핑
+# 3. 설정 및 매핑 (표시 순서 및 색상)
 # -----------------------------------------------------------------------------
 DISPLAY_ORDER = [
     '정상재고',
@@ -139,25 +153,28 @@ st.sidebar.markdown("---")
 # [PAGE 1] 재고 조회
 # =============================================================================
 if page == "🔍 재고 조회":
-    st.title("🔍 재고 조회 및 관리")
+    st.subheader("조건 검색")
 
-    st.sidebar.header("조건 검색")
+    st.sidebar.header("필터 설정")
     filter_keys = ['전체 보기', '작년 대비 변화 있음', '신규재고'] + DISPLAY_ORDER
     selected_filter_label = st.sidebar.selectbox("조회 모드 선택", filter_keys)
     
+    # 필터링 로직
     if selected_filter_label == '전체 보기': selected_col = 'All'
     elif selected_filter_label == '작년 대비 변화 있음': selected_col = 'Change'
     elif selected_filter_label == '신규재고': selected_col = '신규재고'
     else: selected_col = COL_MAPPING.get(selected_filter_label, '')
 
+    # 범례 표시
     st.sidebar.markdown("---")
-    st.sidebar.header("상태별 색상")
+    st.sidebar.markdown("**상태별 색상 범례**")
     for label in DISPLAY_ORDER:
         color = COLOR_DICT.get(label, '#FFFFFF')
         text_color = "white" if label in ['장기 렌탈', '25~26년도 폐기', '폐기'] else "black"
-        style_str = f"background-color: {color}; color: {text_color}; padding: 5px; border-radius: 5px; margin-bottom: 5px; font-size:14px;"
+        style_str = f"background-color: {color}; color: {text_color}; padding: 5px; border-radius: 5px; margin-bottom: 5px; font-size:12px;"
         st.sidebar.markdown(f'<div style="{style_str}">{label}</div>', unsafe_allow_html=True)
 
+    # 데이터 필터링
     filtered_df = df.copy()
     if selected_col == 'All': pass
     elif selected_col == 'Change': filtered_df = filtered_df[filtered_df['작년 대비 변화'] != '변화 없음']
@@ -170,6 +187,7 @@ if page == "🔍 재고 조회":
     st.markdown(f"**검색 결과: {len(filtered_df)}건**")
 
     if not filtered_df.empty:
+        # 상태 컬럼 생성 (우선순위에 따라)
         conditions = []
         choices = []
         for key_label in DISPLAY_ORDER:
@@ -179,9 +197,12 @@ if page == "🔍 재고 조회":
                 conditions.append(mask)
                 choices.append(key_label)
 
-        if conditions: filtered_df['상태'] = np.select(conditions, choices, default='')
-        else: filtered_df['상태'] = ''
+        if conditions:
+            filtered_df['상태'] = np.select(conditions, choices, default='')
+        else:
+            filtered_df['상태'] = ''
 
+        # 스타일링 함수
         def color_status_col(val):
             if val in COLOR_DICT:
                 bg = COLOR_DICT[val]
@@ -193,7 +214,10 @@ if page == "🔍 재고 조회":
             if val != '변화 없음': return 'background-color: #FFF2CC; color: black;'
             return ''
 
+        # 표시할 컬럼 정의
         final_cols = ['대분류', '중분류', '모델명', '제품번호', '25년 1월', '26년 1월', '작년 대비 변화', '상태']
+        
+        # 데이터프레임 표시
         st.dataframe(
             filtered_df[final_cols].style
             .map(color_status_col, subset=['상태'])
@@ -208,9 +232,10 @@ if page == "🔍 재고 조회":
 # [PAGE 2] 보고서 (Report)
 # =============================================================================
 elif page == "📊 보고서 (Report)":
-    st.title("📊 재고 변동 보고서 (Report)")
+    st.subheader("📉 자산 변동 현황 보고서")
     st.markdown("---")
 
+    # 통계 계산
     count_25 = df['25년 1월'].notna().sum()
     count_26 = df['26년 1월'].notna().sum()
 
@@ -232,7 +257,7 @@ elif page == "📊 보고서 (Report)":
     total_transfer = count_transfer_25 + count_transfer_old
     total_loss = count_loss_event + count_loss_office
     
-    st.subheader("📌 주요 재고 현황")
+    # 1. 상단 지표 (Metrics)
     col1, col2, col3, col4 = st.columns(4)
     with col1: st.metric("2026년 총 재고", f"{count_26:,}개")
     with col2: st.metric("✨ 신규 재고", f"{count_new:,}개")
@@ -248,7 +273,8 @@ elif page == "📊 보고서 (Report)":
 
     st.markdown("---")
 
-    st.subheader("📉 자산 감소/변동 요인 분석")
+    # 2. 차트 (Plotly Bar Chart)
+    st.subheader("📊 변동 요인 분석 차트")
     change_data = pd.DataFrame({
         '항목': ['행사장 분실', '사무실 분실', '25~26년도 폐기', '기타 폐기', '25~26년도 이관/판매', '기타 이관/판매'],
         '수량': [count_loss_event, count_loss_office, count_disposal_25, count_disposal_old, count_transfer_25, count_transfer_old],
@@ -262,21 +288,21 @@ elif page == "📊 보고서 (Report)":
         fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="수량")
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("감소/변동 내역이 없습니다.")
+        st.info("표시할 변동 내역 데이터가 없습니다.")
 
     st.markdown("---")
-    st.subheader("📋 상세 내역 조회")
     
-    sub_tab0, sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs(["✨ 신규재고 내역", "⚠️ 분실 내역", "🤝 25~26년도 판매/이관/기증", "🗑️ 25~26년도 폐기", "🏢 업무용 내역"])
-    view_cols = ['구분', '중분류', '모델명', '제품번호', '26년 1월']
+    # 3. 상세 내역 (Tabs)
+    st.subheader("📋 상세 내역 보기")
+    sub_tab0, sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs(["✨ 신규재고", "⚠️ 분실", "🤝 판매/이관", "🗑️ 폐기", "🏢 업무용"])
+    view_cols = ['중분류', '모델명', '제품번호', '26년 1월']
 
     with sub_tab0:
         if '신규재고' in df.columns:
             new_items = df[df['신규재고'].astype(str).str.upper().str.contains('V')].copy()
             if not new_items.empty:
-                new_items['구분'] = '신규재고'
                 st.dataframe(new_items[view_cols], use_container_width=True)
-            else: st.info("신규재고 내역이 없습니다.")
+            else: st.info("내역이 없습니다.")
 
     with sub_tab1:
         cond1 = df['25년~26년 행사장 분실'].astype(str).str.upper().str.contains('V') if '25년~26년 행사장 분실' in df.columns else False
@@ -284,15 +310,14 @@ elif page == "📊 보고서 (Report)":
         loss_items = df[cond1 | cond2].copy()
         if not loss_items.empty:
             loss_items['구분'] = np.where(loss_items['25년~26년 행사장 분실'].astype(str).str.upper().str.contains('V'), '행사장 분실', '사무실 분실')
-            st.dataframe(loss_items[view_cols], use_container_width=True)
-        else: st.success("해당 기간 분실 내역이 없습니다.")
+            st.dataframe(loss_items[['구분'] + view_cols], use_container_width=True)
+        else: st.success("분실 내역이 없습니다.")
 
     with sub_tab2:
         col_name = '25년도 판매, 이관, 기증'
         if col_name in df.columns:
             items_trans = df[df[col_name].astype(str).str.upper().str.contains('V')].copy()
             if not items_trans.empty:
-                items_trans['구분'] = '25~26 판매/이관'
                 st.dataframe(items_trans[view_cols], use_container_width=True)
             else: st.info("내역이 없습니다.")
 
@@ -301,7 +326,6 @@ elif page == "📊 보고서 (Report)":
         if col_name in df.columns:
             items_disp = df[df[col_name].astype(str).str.upper().str.contains('V')].copy()
             if not items_disp.empty:
-                items_disp['구분'] = '25~26 폐기'
                 st.dataframe(items_disp[view_cols], use_container_width=True)
             else: st.info("내역이 없습니다.")
             
@@ -309,6 +333,5 @@ elif page == "📊 보고서 (Report)":
         if '업무용' in df.columns:
             biz_items = df[df['업무용'].astype(str).str.upper().str.contains('V')].copy()
             if not biz_items.empty:
-                biz_items['구분'] = '업무용'
                 st.dataframe(biz_items[view_cols], use_container_width=True)
-            else: st.info("업무용으로 분류된 자산이 없습니다.")
+            else: st.info("내역이 없습니다.")
