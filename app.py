@@ -65,7 +65,7 @@ def load_data(file_path):
         return None, str(e)
 
 # 파일 로드
-FILE_PATH = '26년재고조사표-r1.xlsx'
+FILE_PATH = '휴레항.xlsx'
 df, error_msg = load_data(FILE_PATH)
 
 if df is None:
