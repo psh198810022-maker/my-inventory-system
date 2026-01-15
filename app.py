@@ -41,19 +41,18 @@ def load_data():
         
         # 구글 드라이브 링크 변환 로직
         if "/file/d/" in file_url:
-            file_id = file_url.split("/file/d/")[1].split("/")[0]
-            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            parts = file_url.split("/file/d/")
+            if len(parts) > 1:
+                file_id = parts[1].split("/")[0]
+                download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            else:
+                return None, None, "링크 형식이 올바르지 않습니다."
         elif "/spreadsheets/d/" in file_url:
-            file_id = file_url.split("/spreadsheets/d/")[1].split("/")[0]
-            download_url = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx"
+            parts = file_url.split("/spreadsheets/d/")
+            if len(parts) > 1:
+                file_id = parts[1].split("/")[0]
+                download_url = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx"
+            else:
+                return None, None, "링크 형식이 올바르지 않습니다."
         else:
-            return None, None, "올바른 구글 드라이브 공유 링크가 아닙니다."
-
-        xls = pd.ExcelFile(download_url)
-        
-        # [1] 메인 재고 시트
-        df_main = pd.read_excel(xls, sheet_name=0, header=1)
-        
-        # [2] 폐기예정목록 시트 로드 시도
-        if "폐기예정목록" in xls.sheet_names:
-            df_disposal_list = pd.read_excel(xls, sheet_name="폐기예정
+            return None, None, "올바른 구글 드라이브 공유
