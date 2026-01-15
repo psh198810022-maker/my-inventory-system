@@ -4,11 +4,10 @@ import numpy as np
 import plotly.express as px
 
 # -----------------------------------------------------------------------------
-# 1. 페이지 설정 및 로그인 (보안 강화)
+# 1. 페이지 설정 및 로그인
 # -----------------------------------------------------------------------------
 st.set_page_config(page_title="2026년도 재고조사 관리 시스템", layout="wide")
 
-# [보안] 앱 접속 비밀번호 설정
 PASSWORD = "1234" 
 
 if "authenticated" not in st.session_state:
@@ -33,16 +32,13 @@ if not st.session_state.authenticated:
 st.title("📊 2026년도 재고조사 관리 시스템")
 
 # -----------------------------------------------------------------------------
-# 2. 데이터 로드 함수 (다중 시트 지원 + 자동 업데이트)
+# 2. 데이터 로드 함수
 # -----------------------------------------------------------------------------
-# ttl=600: 600초(10분)마다 데이터를 새로 가져옵니다. (자동 업데이트 효과)
 @st.cache_data(ttl=600)
 def load_data():
     try:
-        # Secrets에서 엑셀 주소 가져오기
         file_url = st.secrets["excel_url"]
         
-        # 구글 드라이브 링크 변환
         if "/file/d/" in file_url:
             file_id = file_url.split("/file/d/")[1].split("/")[0]
             download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -52,31 +48,28 @@ def load_data():
         else:
             return None, None, "올바른 구글 드라이브 공유 링크가 아닙니다."
 
-        # 엑셀 파일 전체 로드 (pd.ExcelFile 사용)
         xls = pd.ExcelFile(download_url)
         
-        # [1] 메인 재고 시트 로드 (첫 번째 시트, header=1)
+        # [1] 메인 재고 시트
         df_main = pd.read_excel(xls, sheet_name=0, header=1)
         
-        # [2] 폐기예정목록 시트 로드 (시트 이름으로 찾기)
+        # [2] 폐기예정목록 시트
         if "폐기예정목록" in xls.sheet_names:
-            df_disposal_list = pd.read_excel(xls, sheet_name="폐기예정목록") # 보통 첫 줄이 헤더이므로 기본값 사용
+            df_disposal_list = pd.read_excel(xls, sheet_name="폐기예정목록") 
         else:
-            df_disposal_list = pd.DataFrame() # 시트가 없으면 빈 표 생성
+            df_disposal_list = pd.DataFrame()
 
-        # --- 메인 데이터 전처리 ---
+        # --- 전처리 ---
         df_main.columns = [str(c).strip() for c in df_main.columns]
 
         if df_main.empty:
             return None, None, "메인 데이터 파일이 비어있습니다."
 
-        # 필수 컬럼 확인 ('소분류' 추가됨)
         required_cols = ['idx', '대분류', '중분류', '소분류', '모델명', '제품번호', '25년 1월', '26년 1월']
         for col in required_cols:
             if col not in df_main.columns:
                 df_main[col] = ""
 
-        # 작년 대비 변화 계산
         def calculate_change(row):
             u_val = str(row['25년 1월']).strip() if pd.notna(row['25년 1월']) else ""
             v_val = str(row['26년 1월']).strip() if pd.notna(row['26년 1월']) else ""
@@ -93,7 +86,6 @@ def load_data():
     except Exception as e:
         return None, None, f"데이터 로드 중 오류 발생: {str(e)}"
 
-# 데이터 로드 실행
 df, df_disposal_target, error_msg = load_data()
 
 if error_msg:
@@ -152,7 +144,6 @@ COLOR_DICT = {
 # 4. 사이드바 네비게이션
 # -----------------------------------------------------------------------------
 st.sidebar.title("🗂️ 메뉴")
-# 메뉴에 '폐기예정목록' 추가
 page = st.sidebar.radio("이동할 페이지를 선택하세요", ["🔍 재고 조회", "📊 보고서 (Report)", "🗑️ 폐기예정목록"])
 
 st.sidebar.markdown("---")
@@ -170,13 +161,11 @@ if page == "🔍 재고 조회":
     filter_keys = ['전체 보기', '작년 대비 변화 있음', '신규재고'] + DISPLAY_ORDER
     selected_filter_label = st.sidebar.selectbox("조회 모드 선택", filter_keys)
     
-    # 필터링 로직
     if selected_filter_label == '전체 보기': selected_col = 'All'
     elif selected_filter_label == '작년 대비 변화 있음': selected_col = 'Change'
     elif selected_filter_label == '신규재고': selected_col = '신규재고'
     else: selected_col = COL_MAPPING.get(selected_filter_label, '')
 
-    # 범례 표시
     st.sidebar.markdown("---")
     st.sidebar.markdown("**상태별 색상 범례**")
     for label in DISPLAY_ORDER:
@@ -185,7 +174,6 @@ if page == "🔍 재고 조회":
         style_str = f"background-color: {color}; color: {text_color}; padding: 5px; border-radius: 5px; margin-bottom: 5px; font-size:12px;"
         st.sidebar.markdown(f'<div style="{style_str}">{label}</div>', unsafe_allow_html=True)
 
-    # 데이터 필터링
     filtered_df = df.copy()
     if selected_col == 'All': pass
     elif selected_col == 'Change': filtered_df = filtered_df[filtered_df['작년 대비 변화'] != '변화 없음']
@@ -198,7 +186,6 @@ if page == "🔍 재고 조회":
     st.markdown(f"**검색 결과: {len(filtered_df)}건**")
 
     if not filtered_df.empty:
-        # 상태 컬럼 생성
         conditions = []
         choices = []
         for key_label in DISPLAY_ORDER:
@@ -213,7 +200,6 @@ if page == "🔍 재고 조회":
         else:
             filtered_df['상태'] = ''
 
-        # 스타일링 함수
         def color_status_col(val):
             if val in COLOR_DICT:
                 bg = COLOR_DICT[val]
@@ -225,10 +211,7 @@ if page == "🔍 재고 조회":
             if val != '변화 없음': return 'background-color: #FFF2CC; color: black;'
             return ''
 
-        # [수정] 소분류 추가
         final_cols = ['대분류', '중분류', '소분류', '모델명', '제품번호', '25년 1월', '26년 1월', '작년 대비 변화', '상태']
-        
-        # 없는 컬럼은 제외하고 표시 (에러 방지)
         display_cols = [c for c in final_cols if c in filtered_df.columns]
 
         st.dataframe(
@@ -283,7 +266,7 @@ elif page == "📊 보고서 (Report)":
 
     st.markdown("---")
     
-    # 차트
+    st.subheader("📊 변동 요인 분석 차트")
     change_data = pd.DataFrame({
         '항목': ['행사장 분실', '사무실 분실', '25~26년도 폐기', '기타 폐기', '25~26년도 이관/판매', '기타 이관/판매'],
         '수량': [count_loss_event, count_loss_office, count_disposal_25, count_disposal_old, count_transfer_25, count_transfer_old],
@@ -294,18 +277,69 @@ elif page == "📊 보고서 (Report)":
     if not change_data.empty:
         fig = px.bar(change_data, x='항목', y='수량', color='항목', text='수량',
                      color_discrete_sequence=change_data['색상'].tolist())
+        fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="수량")
         st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("---")
+
+    st.subheader("📋 상세 내역 보기")
+    sub_tab0, sub_tab1, sub_tab2, sub_tab3, sub_tab4 = st.tabs(["✨ 신규재고", "⚠️ 분실", "🤝 판매/이관", "🗑️ 폐기", "🏢 업무용"])
+    
+    view_cols = ['대분류', '중분류', '소분류', '모델명', '제품번호', '26년 1월']
+    valid_view_cols = [c for c in view_cols if c in df.columns]
+
+    with sub_tab0:
+        if '신규재고' in df.columns:
+            new_items = df[df['신규재고'].astype(str).str.upper().str.contains('V')].copy()
+            if not new_items.empty:
+                st.dataframe(new_items[valid_view_cols], use_container_width=True)
+            else: st.info("내역이 없습니다.")
+
+    with sub_tab1:
+        cond1 = df['25년~26년 행사장 분실'].astype(str).str.upper().str.contains('V') if '25년~26년 행사장 분실' in df.columns else False
+        cond2 = df['25~26년 사무실 분실'].astype(str).str.upper().str.contains('V') if '25~26년 사무실 분실' in df.columns else False
+        loss_items = df[cond1 | cond2].copy()
+        if not loss_items.empty:
+            loss_items['구분'] = np.where(loss_items['25년~26년 행사장 분실'].astype(str).str.upper().str.contains('V'), '행사장 분실', '사무실 분실')
+            st.dataframe(loss_items[['구분'] + valid_view_cols], use_container_width=True)
+        else: st.success("분실 내역이 없습니다.")
+
+    with sub_tab2:
+        col_name = '25년도 판매, 이관, 기증'
+        if col_name in df.columns:
+            items_trans = df[df[col_name].astype(str).str.upper().str.contains('V')].copy()
+            if not items_trans.empty:
+                st.dataframe(items_trans[valid_view_cols], use_container_width=True)
+            else: st.info("내역이 없습니다.")
+
+    with sub_tab3:
+        col_name = '25년도 폐기'
+        if col_name in df.columns:
+            items_disp = df[df[col_name].astype(str).str.upper().str.contains('V')].copy()
+            if not items_disp.empty:
+                st.dataframe(items_disp[valid_view_cols], use_container_width=True)
+            else: st.info("내역이 없습니다.")
+            
+    with sub_tab4:
+        if '업무용' in df.columns:
+            biz_items = df[df['업무용'].astype(str).str.upper().str.contains('V')].copy()
+            if not biz_items.empty:
+                st.dataframe(biz_items[valid_view_cols], use_container_width=True)
+            else: st.info("내역이 없습니다.")
 
 # =============================================================================
-# [PAGE 3] 폐기예정목록 (새로 추가됨)
+# [PAGE 3] 폐기예정목록
 # =============================================================================
 elif page == "🗑️ 폐기예정목록":
     st.subheader("🗑️ 폐기 예정 자산 목록")
-    st.info("이 목록은 '폐기예정목록' 시트의 내용입니다. 시트에 내용을 추가하면 자동으로 반영됩니다.")
-    
+    # [수정] 안내 문구 삭제됨
+
     if df_disposal_target is not None and not df_disposal_target.empty:
-        # 데이터 표시
-        st.dataframe(df_disposal_target, use_container_width=True, height=700)
+        # [수정] '상세사양' 컬럼이 있으면 숨기기
+        display_df = df_disposal_target.copy()
+        if '상세사양' in display_df.columns:
+            display_df = display_df.drop(columns=['상세사양'])
+            
+        st.dataframe(display_df, use_container_width=True, height=700)
     else:
         st.warning("아직 등록된 폐기 예정 목록이 없거나, 시트 이름('폐기예정목록')을 찾을 수 없습니다.")
-        st.markdown("**확인사항:** 엑셀 파일에 **'폐기예정목록'**이라는 이름의 시트가 있는지 확인해주세요.")
