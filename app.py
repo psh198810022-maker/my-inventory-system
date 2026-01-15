@@ -39,6 +39,7 @@ def load_data():
     try:
         file_url = st.secrets["excel_url"]
         
+        # 구글 드라이브 링크 변환 로직
         if "/file/d/" in file_url:
             file_id = file_url.split("/file/d/")[1].split("/")[0]
             download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
@@ -53,27 +54,6 @@ def load_data():
         # [1] 메인 재고 시트
         df_main = pd.read_excel(xls, sheet_name=0, header=1)
         
-        # [2] 폐기예정목록 시트
+        # [2] 폐기예정목록 시트 로드 시도
         if "폐기예정목록" in xls.sheet_names:
-            df_disposal_list = pd.read_excel(xls, sheet_name="폐기예정목록") 
-        else:
-            df_disposal_list = pd.DataFrame()
-
-        # --- 전처리 ---
-        df_main.columns = [str(c).strip() for c in df_main.columns]
-
-        if df_main.empty:
-            return None, None, "메인 데이터 파일이 비어있습니다."
-
-        required_cols = ['idx', '대분류', '중분류', '소분류', '모델명', '제품번호', '25년 1월', '26년 1월']
-        for col in required_cols:
-            if col not in df_main.columns:
-                df_main[col] = ""
-
-        def calculate_change(row):
-            u_val = str(row['25년 1월']).strip() if pd.notna(row['25년 1월']) else ""
-            v_val = str(row['26년 1월']).strip() if pd.notna(row['26년 1월']) else ""
-
-            if u_val == "" or u_val == "nan": return "신규 재고"
-            elif u_val == v_val: return "변화 없음"
-            else: return f"{
+            df_disposal_list = pd.read_excel(xls, sheet_name="폐기예정
